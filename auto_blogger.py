@@ -6,13 +6,37 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import google.generativeai as genai
+from requests.auth import HTTPBasicAuth
+
+# Load API keys from the file
+def load_api_keys(file_path):
+    keys = {}
+    with open(file_path, 'r') as f:
+        for line in f:
+            name, value = line.strip().split('=')
+            keys[name] = value
+    return keys
+
+keys = load_api_keys('api_keys.txt')
+
+GENAI_API_KEY = keys['GENAI_API_KEY']
+BLOGGER_BLOG_ID = keys['BLOGGER_BLOG_ID']
 
 # If modifying these SCOPES, delete the file token.json.
-SCOPES = ['https://www.googleapis.com/auth/youtube.readonly']
+SCOPES = ['https://www.googleapis.com/auth/youtube.readonly', 'https://www.googleapis.com/auth/blogger']
+
+#SCOPES = ['https://www.googleapis.com/auth/youtube.readonly']
 PLAYLIST_ID = 'PLefHOXeb70TKiVBztN7cOQt6PuOkOxeCx'  # Playlist ID
 
 # Generative AI OAuth details
 GENAI_CLIENT_SECRETS_FILE = "genai_client_secret.json"  # Path to your Generative AI client secret file
+#GENAI_API_KEY = 'YOUR_GENAI_API_KEY'  # Replace with your actual API key
+
+# WordPress details
+WORDPRESS_URL = 'https://wordpress.com/post/5minstart.wordpress.com'
+#WORDPRESS_URL = 'https://5minstart.wordpress.com/wp-json/wp/v2/posts'
+WORDPRESS_USER = 'leomoon85'
+WORDPRESS_APP_PASSWORD = 'hrpr7wgjfc123'  # Use an application password for authentication
 
 def authenticate_youtube_api():
     creds = None
@@ -38,17 +62,18 @@ def authenticate_genai_api():
             creds.refresh(Request())
         else:
             flow = InstalledAppFlow.from_client_secrets_file(
-                GENAI_CLIENT_SECRETS_FILE, scopes=["https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/generative-language.retriever"])
+                GENAI_CLIENT_SECRETS_FILE, scopes=["https://www.googleapis.com/auth/cloud-platform", "https://www.googleapis.com/auth/generative-language.retriever"])
             creds = flow.run_local_server(port=0)
         with open('genai_token.json', 'w') as token:
             token.write(creds.to_json())
     genai.credentials = creds
+    genai.configure(api_key=GENAI_API_KEY)
 
 def get_videos_with_descriptions(youtube, playlist_id, max_results=50):
     videos_with_descriptions = []
     next_page_token = None
 
-    while len(videos_with_descriptions) < 10:
+    while len(videos_with_descriptions) < 2:
         request = youtube.playlistItems().list(
             part='snippet',
             playlistId=playlist_id,
@@ -87,11 +112,56 @@ def get_description(youtube, video_id):
     return None
 
 def create_blog_from_description(description):
-    response = genai.generate_text(
-        model="models/text-davinci-002",
-        prompt=f"Write a blog post based on the following description: {description}"
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    prompt = f"Write a blog post based on the following description from a YouTube video. The first line should be an overview. Text of description is:\n{description}"
+    
+    response = model.generate_content(prompt)
+    return response.text
+
+def post_to_blogger(blog_id, title, content, creds):
+    service = build('blogger', 'v3', credentials=creds)
+    post = {
+        'title': title,
+        'content': content
+    }
+    request = service.posts().insert(blogId=blog_id, body=post)
+    response = request.execute()
+    return response
+
+def post_to_wix(title, content):
+    url = WIX_API_URL.format(WIXSITEID=WIX_SITE_ID)
+    headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {WIX_ACCESS_TOKEN}'
+    }
+    data = {
+        'title': title,
+        'content': {
+            'text': content
+        },
+        'status': 'PUBLISHED'
+    }
+    response = requests.post(url, headers=headers, json=data)
+    response.raise_for_status()  # Raise an error for bad status codes
+    return response.json()
+
+def post_to_wordpress(title, content):
+    headers = {
+        'Content-Type': 'application/json'
+    }
+    data = {
+        'title': title,
+        'content': content,
+        'status': 'publish'
+    }
+    response = requests.post(
+        WORDPRESS_URL,
+        headers=headers,
+        json=data,
+        auth=HTTPBasicAuth(WORDPRESS_USER, WORDPRESS_APP_PASSWORD)
     )
-    return response["choices"][0]["text"]
+    response.raise_for_status()  # Raise an error for bad status codes
+    return response.json()
 
 def main():
     creds = authenticate_youtube_api()
@@ -101,18 +171,16 @@ def main():
     
     videos = get_videos_with_descriptions(youtube, PLAYLIST_ID)
     
-    if not os.path.exists('blog'):
-        os.makedirs('blog')
-    
     for video in videos:
         video_title = video['title']
         video_description = video['description']
         blog_content = create_blog_from_description(video_description)
-        sanitized_title = ''.join(c for c in video_title if c.isalnum() or c in (' ', '_')).rstrip()
+        post_response = post_to_blogger(BLOGGER_BLOG_ID, video_title, blog_content, creds)
+        #wix post_response = post_to_wix(video_title, blog_content)
+        print(f'Blog post created for video: {video_title}')
+        print(f'Post URL: {post_response.get("url", "N/A")}')
         
-        with open(f'blog/{sanitized_title}.txt', 'w', encoding='utf-8') as f:
-            f.write(blog_content)
-        print(f'Blog post saved for video: {video_title}')
+        #print(f'Post URL: {post_response["link"]}')
 
 if __name__ == "__main__":
     main()
