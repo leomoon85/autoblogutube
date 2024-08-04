@@ -8,6 +8,10 @@ from googleapiclient.discovery import build
 import google.generativeai as genai
 from requests.auth import HTTPBasicAuth
 
+#TRENDING_QUERY = 'bollywood movie interviews'
+TRENDING_QUERY = 'Malayalam actor interviews'
+MAX_RESULTS = 10
+
 # Load API keys from the file
 def load_api_keys(file_path):
     keys = {}
@@ -30,13 +34,8 @@ PLAYLIST_ID = 'PLefHOXeb70TKiVBztN7cOQt6PuOkOxeCx'  # Playlist ID
 
 # Generative AI OAuth details
 GENAI_CLIENT_SECRETS_FILE = "genai_client_secret.json"  # Path to your Generative AI client secret file
-#GENAI_API_KEY = 'YOUR_GENAI_API_KEY'  # Replace with your actual API key
 
-# WordPress details
-WORDPRESS_URL = 'https://wordpress.com/post/5minstart.wordpress.com'
-#WORDPRESS_URL = 'https://5minstart.wordpress.com/wp-json/wp/v2/posts'
-WORDPRESS_USER = 'leomoon85'
-WORDPRESS_APP_PASSWORD = 'hrpr7wgjfc123'  # Use an application password for authentication
+
 
 def authenticate_youtube_api():
     creds = None
@@ -68,6 +67,46 @@ def authenticate_genai_api():
             token.write(creds.to_json())
     genai.credentials = creds
     genai.configure(api_key=GENAI_API_KEY)
+
+def get_videos_for_query(youtube, query, max_results=10):
+    request = youtube.search().list(
+        part='snippet',
+        q=query,
+        type='video',
+        maxResults=max_results,
+        regionCode='IN'  # India region code for Malayalam and Bollywood content
+    )
+    response = request.execute()
+    
+    videos = []
+    for item in response['items']:
+        video_id = item['id']['videoId']
+        video_title = item['snippet']['title']
+        video_description = item['snippet']['description']
+        video_url = f"https://www.youtube.com/watch?v={video_id}"
+        videos.append({
+            'id': video_id,
+            'title': video_title,
+            'description': video_description,
+            #'url': video_url,
+            'url': f"https://www.youtube.com/embed/{video_id}"
+        })
+    
+    return videos
+
+def get_trending_videos(youtube, query, max_results=10):
+    video_queries = [
+        ('Malayalam actor interview', 1),
+        ('Bollywood interview', 2),
+        ('Fashion discussions', 2),
+        ('Music review podcast', 1)
+    ]
+    all_videos = []
+    for query, count in video_queries:
+        videos = get_videos_for_query(youtube, query, count)
+        all_videos.extend(videos)
+    
+    return all_videos
 
 def get_videos_with_descriptions(youtube, playlist_id, max_results=50):
     videos_with_descriptions = []
@@ -111,12 +150,19 @@ def get_description(youtube, video_id):
         return response['items'][0]['snippet']['description']
     return None
 
-def create_blog_from_description(description):
+def create_blog_from_description(title, description, video_url):
     model = genai.GenerativeModel('gemini-1.5-flash')
-    prompt = f"Write a blog post based on the following description from a YouTube video. The first line should be an overview. Text of description is:\n{description}"
-    
+    prompt = f"Write a blog post based on the following description from a YouTube video in html format. No suggestions to user. The first line should be an overview. Text of description is:\n{description}"
+    #prompt = (f"Write a blog post based on the following YouTube video description. "
+   #           f"The first line should be an overview. "
+    #          f"elaborate it in 2 paragraphs . details is:\n{description}\n\n" 
+     #         f"Format into 2 to 3 paragraphs , if links are there format as links in seperate lines , if #keywords are there use as keywords at last in a seperate lines")
+              #f"Embed the video URL {video_url} in the blog post.")
     response = model.generate_content(prompt)
-    return response.text
+    blog_content = response.text + f'\n\n<iframe width="560" height="315" src="{video_url}" frameborder="0" allowfullscreen></iframe>'
+    
+    
+    return blog_content
 
 def post_to_blogger(blog_id, title, content, creds):
     service = build('blogger', 'v3', credentials=creds)
@@ -169,12 +215,14 @@ def main():
     
     authenticate_genai_api()
     
-    videos = get_videos_with_descriptions(youtube, PLAYLIST_ID)
+    #videos = get_videos_with_descriptions(youtube, PLAYLIST_ID)
+    videos = get_trending_videos(youtube, TRENDING_QUERY, MAX_RESULTS)
     
     for video in videos:
         video_title = video['title']
         video_description = video['description']
-        blog_content = create_blog_from_description(video_description)
+        video_url = video['url']
+        blog_content = create_blog_from_description(video_title,video_description, video_url)
         post_response = post_to_blogger(BLOGGER_BLOG_ID, video_title, blog_content, creds)
         #wix post_response = post_to_wix(video_title, blog_content)
         print(f'Blog post created for video: {video_title}')
