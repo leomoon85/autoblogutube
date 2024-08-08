@@ -7,6 +7,7 @@ from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 import google.generativeai as genai
 from requests.auth import HTTPBasicAuth
+from pytrends.request import TrendReq
 
 #TRENDING_QUERY = 'bollywood movie interviews'
 TRENDING_QUERY = 'Malayalam actor interviews'
@@ -94,12 +95,19 @@ def get_videos_for_query(youtube, query, max_results=10):
     
     return videos
 
+def get_trending_searches_from_google():
+    pytrends = TrendReq(hl='en-US', tz=360)
+    trending_searches_df = pytrends.trending_searches(pn='india')
+    trending_searches = trending_searches_df[0].tolist()
+    return trending_searches[:5]  # Limit to top 5 trending searches
+
 def get_trending_videos(youtube, query, max_results=10):
     video_queries = [
-        ('Malayalam actor interview', 1),
+ #       ('Cheap used car india', 5),
+        ('Malayalam interview', 1),
         ('Bollywood interview', 2),
-        ('Fashion discussions', 2),
-        ('Music review podcast', 1)
+        ('France Fashion discussions', 2),
+        ('Tamil interview podcast', 1)
     ]
     all_videos = []
     for query, count in video_queries:
@@ -215,18 +223,20 @@ def main():
     
     authenticate_genai_api()
     
-    #videos = get_videos_with_descriptions(youtube, PLAYLIST_ID)
-    videos = get_trending_videos(youtube, TRENDING_QUERY, MAX_RESULTS)
-    
-    for video in videos:
-        video_title = video['title']
-        video_description = video['description']
-        video_url = video['url']
-        blog_content = create_blog_from_description(video_title,video_description, video_url)
-        post_response = post_to_blogger(BLOGGER_BLOG_ID, video_title, blog_content, creds)
-        #wix post_response = post_to_wix(video_title, blog_content)
-        print(f'Blog post created for video: {video_title}')
-        print(f'Post URL: {post_response.get("url", "N/A")}')
+    trending_searches = get_trending_searches_from_google() 
+    for query in trending_searches:
+        videos = get_videos_for_query(youtube, query)
+        #videos = get_videos_with_descriptions(youtube, PLAYLIST_ID)
+        #videos = get_trending_videos(youtube, TRENDING_QUERY, MAX_RESULTS)
+        for video in videos:
+            video_title = video['title']
+            video_description = video['description']
+            video_url = video['url']
+            blog_content = create_blog_from_description(video_title,video_description, video_url)
+            post_response = post_to_blogger(BLOGGER_BLOG_ID, video_title, blog_content, creds)
+            #wix post_response = post_to_wix(video_title, blog_content)
+            print(f'Blog post created for video: {video_title}')
+            print(f'Post URL: {post_response.get("url", "N/A")}')
         
         #print(f'Post URL: {post_response["link"]}')
 
