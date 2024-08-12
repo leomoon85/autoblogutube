@@ -69,7 +69,7 @@ def authenticate_genai_api():
     genai.credentials = creds
     genai.configure(api_key=GENAI_API_KEY)
 
-def get_videos_for_query(youtube, query, max_results=10):
+def get_videos_for_query(youtube, query, max_results=1):
     request = youtube.search().list(
         part='snippet',
         q=query,
@@ -97,10 +97,45 @@ def get_videos_for_query(youtube, query, max_results=10):
 
 def get_trending_searches_from_google():
     pytrends = TrendReq(hl='en-US', tz=360)
-    trending_searches_df = pytrends.trending_searches(pn='india')
-    trending_searches = trending_searches_df[0].tolist()
-    return trending_searches[:5]  # Limit to top 5 trending searches
 
+    # Define search terms to represent different categories
+    categories = {
+        'general': '',
+        'entertainment': 'Bollywood movies',
+        'sports': 'cricket',
+        'technology': 'latest gadgets',
+        'finance': 'stock market'
+    }
+
+    trending_searches = []
+
+    # Set to track already fetched trends to avoid duplication
+    fetched_trends = set()
+
+    # Fetch top trending searches from each category
+    for category, term in categories.items():
+        if term:
+            pytrends.build_payload([term], cat=0, geo='IN', timeframe='now 1-d')
+            related_queries = pytrends.related_queries()[term]['top']
+            if related_queries is not None and not related_queries.empty:
+                for query in related_queries['query']:
+                    if query not in fetched_trends:
+                        trending_searches.append(query)
+                        fetched_trends.add(query)
+                        break
+        else:
+            trending_searches_df = pytrends.trending_searches(pn='india')
+            if not trending_searches_df.empty:
+                for query in trending_searches_df[0]:
+                    if query not in fetched_trends:
+                        trending_searches.append(query)
+                        fetched_trends.add(query)
+                        break
+
+    # Print the resulting list of trending searches
+    print(trending_searches)
+
+    return trending_searches
 def get_trending_videos(youtube, query, max_results=10):
     video_queries = [
  #       ('Cheap used car india', 5),
@@ -160,7 +195,8 @@ def get_description(youtube, video_id):
 
 def create_blog_from_description(title, description, video_url):
     model = genai.GenerativeModel('gemini-1.5-flash')
-    prompt = f"Write a blog post based on the following description from a YouTube video in html format. No suggestions to user. The first line should be an overview. Text of description is:\n{description}"
+    prompt = f"Write a comprehensive blog post based on the following text:\n {description} \nThe blog post should:\nHave an engaging and informative title that accurately reflects the content.\nInclude an attention-grabbing introduction that summarizes the key points.\n Be organized into clear and concise sections with relevant headings.\n Provide in-depth analysis and insights based on the provided text. \n Incorporate relevant keywords and phrases to improve SEO. \n Conclude with a strong summary and call to action. \n The target audience is [target audience general readers]. \n Please write in a [tone persuasive] style \n in html format"
+    #working prompt = f"Write a blog post based on the following description from a YouTube video in html format. No suggestions to user. The first line should be an overview. Text of description is:\n{description}"
     #prompt = (f"Write a blog post based on the following YouTube video description. "
    #           f"The first line should be an overview. "
     #          f"elaborate it in 2 paragraphs . details is:\n{description}\n\n" 
